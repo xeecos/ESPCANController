@@ -1,5 +1,4 @@
 #include "motion.h"
-#include "stepper.h"
 #include "utils.h"
 #include <Arduino.h>
 static hw_timer_t *_timer = NULL;
@@ -42,7 +41,6 @@ void _motion_recalc()
         }
         _interval = 1000000 / _speed;
         _position++;
-        stepper_step();
     }
     timerAlarmWrite(_timer, _interval, true);
 }
@@ -52,12 +50,10 @@ void motion_set_acceleration(int32_t acceleration)
     if(acceleration>0)
     {
         _acceleration = acceleration;
-        stepper_set_direction(false);
     }
     else
     {
         _acceleration = -acceleration;
-        stepper_set_direction(true);
     }
 }
 void motion_set_accel_distance(uint32_t distance)

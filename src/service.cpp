@@ -1,17 +1,15 @@
 #include "service.h"
 #include <Arduino.h>
-#include "stepper.h"
-#include "laser.h"
-#include "motor.h"
 #include "canbus.h"
+#include "planner.h"
+#include "motion.h"
 #include "log.h"
 void service_init()
 {
     LOG_INIT(115200);
     canbus_init();
-    laser_init();
-    motor_init();
-    stepper_init();
+    motion_init();
+    planner_init();
 }
 void service_run()
 {
