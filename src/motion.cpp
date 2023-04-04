@@ -1,96 +1,177 @@
 #include "motion.h"
 #include "utils.h"
+#include "planner.h"
+#include "canbus.h"
 #include <Arduino.h>
-static hw_timer_t *_timer = NULL;
-uint32_t _speed = 0;
-uint32_t _max_speed = 0;
-uint32_t _acceleration = 0;
-uint32_t _position = 0;
-uint32_t _accel_distance;
-uint32_t _distance;
-uint32_t _deaccel_distance;
-void _motion_run();
-void _motion_recalc();
+
+#define ACCELERATION    400.0f
+#define STEPS_PER_MM_X  100
+#define STEPS_PER_MM_Y  100
+#define STEPS_PER_MM_Z  100
+
+QueueHandle_t event_queue = xQueueCreate(1, 32);
+char _task_tx[32];
+void IRAM_ATTR motion_task(void *arg)
+{
+    char _task_rx[32];
+    while(1)
+    {
+        xQueueReceive(event_queue, (void*)_task_rx, portMAX_DELAY);
+        if(!planner_read())
+        {
+            delay(1000);
+            motion_next();
+        }
+    }
+}
 void motion_init()
 {
-
-    _timer = timerBegin(0, 80, true);
-    timerAttachInterrupt(_timer, &_motion_run, true);
-    timerAlarmWrite(_timer, 10000, true);
-    timerAlarmEnable(_timer);
-}
-void _motion_run()
-{
-    _motion_recalc();
-}
-void _motion_recalc()
-{
-    int _interval = 10000;
-    if(_position < _distance)
-    {
-        if (_position < _accel_distance)
-        {
-            _speed = sqrt_int(2 * _acceleration + _speed * _speed);
-        }
-        else if (_position > _distance - _deaccel_distance)
-        {
-            _speed += sqrt_int(_speed * _speed - 2 * _acceleration);
-        }
-        else
-        {
-        }
-        _interval = 1000000 / _speed;
-        _position++;
-    }
-    timerAlarmWrite(_timer, _interval, true);
+    xTaskCreatePinnedToCore(motion_task, "motion_task", 4096, NULL, 10, NULL, 0);
+    motion_next();
 }
 
-void motion_set_acceleration(int32_t acceleration)
+void motion_run(float dx, float dy, float dz, float distance, float speed)
 {
-    if(acceleration>0)
+    float abs_dx = dx<0?-dx:dx;
+    float abs_dy = dy<0?-dy:dy;
+    float abs_dz = dz<0?-dz:dz;
+    float accel_x = ACCELERATION * dx / distance;
+    float accel_y = ACCELERATION * dy / distance;
+    float accel_z = ACCELERATION * dz / distance;
+    float speed_limit = sqrtf(distance * ACCELERATION);
+    speed = speed > speed_limit ? speed_limit : speed;
+    float speed_x = speed * dx / distance;
+    float speed_y = speed * dy / distance;
+    float speed_z = speed * dz / distance;
+    float accel_distance_x = speed_x * speed_x / (accel_x * 2);
+    float accel_distance_y = speed_y * speed_y / (accel_y * 2);
+    float accel_distance_z = speed_z * speed_z / (accel_z * 2);
+    float deaccel_distance_x = accel_distance_x;
+    float deaccel_distance_y = accel_distance_y;
+    float deaccel_distance_z = accel_distance_z;
+    twai_message_t frame;
+    Long2Bytes lv;
+    Uint2Bytes uv;
+    frame.identifier = CID_X_ACCELERATION;
+    frame.data_length_code = 4;
+    lv.longValue = accel_x * STEPS_PER_MM_X;
+    frame.data[0] = lv.bytes[0];
+    frame.data[1] = lv.bytes[1];
+    frame.data[2] = lv.bytes[2];
+    frame.data[3] = lv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_X_ACCEL_DISTANCE;
+    frame.data_length_code = 4;
+    uv.uint32Value = accel_distance_x * STEPS_PER_MM_X;
+    frame.data[0] = uv.bytes[0];
+    frame.data[1] = uv.bytes[1];
+    frame.data[2] = uv.bytes[2];
+    frame.data[3] = uv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_X_DEACCEL_DISTANCE;
+    frame.data_length_code = 4;
+    uv.uint32Value = deaccel_distance_x * STEPS_PER_MM_X;
+    frame.data[0] = uv.bytes[0];
+    frame.data[1] = uv.bytes[1];
+    frame.data[2] = uv.bytes[2];
+    frame.data[3] = uv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_X_TOTAL_DISTANCE;
+    frame.data_length_code = 4;
+    uv.uint32Value = abs_dx * STEPS_PER_MM_X;
+    frame.data[0] = uv.bytes[0];
+    frame.data[1] = uv.bytes[1];
+    frame.data[2] = uv.bytes[2];
+    frame.data[3] = uv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_Y_ACCELERATION;
+    frame.data_length_code = 4;
+    lv.longValue = accel_y * STEPS_PER_MM_Y;
+    frame.data[0] = lv.bytes[0];
+    frame.data[1] = lv.bytes[1];
+    frame.data[2] = lv.bytes[2];
+    frame.data[3] = lv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_Y_ACCEL_DISTANCE;
+    frame.data_length_code = 4;
+    uv.uint32Value = accel_distance_y * STEPS_PER_MM_Y;
+    frame.data[0] = uv.bytes[0];
+    frame.data[1] = uv.bytes[1];
+    frame.data[2] = uv.bytes[2];
+    frame.data[3] = uv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_Y_DEACCEL_DISTANCE;
+    frame.data_length_code = 4;
+    uv.uint32Value = deaccel_distance_y * STEPS_PER_MM_Y;
+    frame.data[0] = uv.bytes[0];
+    frame.data[1] = uv.bytes[1];
+    frame.data[2] = uv.bytes[2];
+    frame.data[3] = uv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_Y_TOTAL_DISTANCE;
+    frame.data_length_code = 4;
+    uv.uint32Value = abs_dy * STEPS_PER_MM_Y;
+    frame.data[0] = uv.bytes[0];
+    frame.data[1] = uv.bytes[1];
+    frame.data[2] = uv.bytes[2];
+    frame.data[3] = uv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_Z_ACCELERATION;
+    frame.data_length_code = 4;
+    lv.longValue = accel_z * STEPS_PER_MM_Z;
+    frame.data[0] = lv.bytes[0];
+    frame.data[1] = lv.bytes[1];
+    frame.data[2] = lv.bytes[2];
+    frame.data[3] = lv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_Z_ACCEL_DISTANCE;
+    frame.data_length_code = 4;
+    uv.uint32Value = accel_distance_z * STEPS_PER_MM_Z;
+    frame.data[0] = uv.bytes[0];
+    frame.data[1] = uv.bytes[1];
+    frame.data[2] = uv.bytes[2];
+    frame.data[3] = uv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_Z_DEACCEL_DISTANCE;
+    frame.data_length_code = 4;
+    uv.uint32Value = deaccel_distance_z * STEPS_PER_MM_Z;
+    frame.data[0] = uv.bytes[0];
+    frame.data[1] = uv.bytes[1];
+    frame.data[2] = uv.bytes[2];
+    frame.data[3] = uv.bytes[3];
+    canbus_send(frame);
+    frame.identifier = CID_Z_TOTAL_DISTANCE;
+    frame.data_length_code = 4;
+    uv.uint32Value = abs_dz * STEPS_PER_MM_Z;
+    frame.data[0] = uv.bytes[0];
+    frame.data[1] = uv.bytes[1];
+    frame.data[2] = uv.bytes[2];
+    frame.data[3] = uv.bytes[3];
+    canbus_send(frame);
+    if(abs_dx>abs_dy&&abs_dx>abs_dz)
     {
-        _acceleration = acceleration;
+        frame.identifier = CID_MOTION_END_X;
+        frame.data_length_code = 0;
+        canbus_send(frame);
     }
-    else
+    if(abs_dy>abs_dx&&abs_dy>abs_dz)
     {
-        _acceleration = -acceleration;
+        frame.identifier = CID_MOTION_END_Y;
+        frame.data_length_code = 0;
+        canbus_send(frame);
     }
-}
-void motion_set_accel_distance(uint32_t distance)
-{
-    _accel_distance = distance;
-}
-void motion_set_deaccel_distance(uint32_t distance)
-{
-    _deaccel_distance = distance;
-}
-void motion_set_total_distance(uint32_t distance)
-{
-    _position = distance;
-    _distance = distance;
-}
-void motion_start()
-{
-    _position = 0;
-}
-void motion_stop()
-{
-    
-}
-void motion_set_power(uint16_t power)
-{
-    
-}
-void motion_set_pwm(int16_t pwm)
-{
-    
+    if(abs_dz>abs_dx&&abs_dz>abs_dy)
+    {
+        frame.identifier = CID_MOTION_END_Z;
+        frame.data_length_code = 0;
+        canbus_send(frame);
+    }
+    frame.identifier = CID_MOTION_START;
+    frame.data_length_code = 0;
+    canbus_send(frame);
 }
 
-uint32_t motion_get_speed()
+void motion_next()
 {
-    return _speed;
-}
-uint32_t motion_get_max_speed()
-{
-    return _max_speed;
+    xQueueSendFromISR(event_queue, (void*)_task_tx, (TickType_t)0);
 }

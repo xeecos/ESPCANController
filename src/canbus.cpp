@@ -32,16 +32,11 @@ void canbus_receive()
 {
     int canid = canbus_message.identifier;
     
-    if(canid==CID_MOTION_START)
+    if(canid==CID_MOTION_END_X||canid==CID_MOTION_END_Y||canid==CID_MOTION_END_Z)
     {
-        motion_start();
-    }
-    else if(canid==CID_MOTION_STOP)
-    {
-        motion_stop();
+        motion_next();
     }
 }
-
 void canbus_send(twai_message_t msg)
 {
     if (twai_transmit(&msg, pdMS_TO_TICKS(100)) == ESP_OK)
